@@ -78,4 +78,19 @@ pub unsafe fn render_frame(ctx: &RenderCtx, frame_index: &mut usize) {
     swapchain_loader.queue_present(direct_queue, &present_info).unwrap();
 }
 
-unsafe fn render_frame_inner(_ctx: &RenderCtx, _current_frame: &Frame, _image_index: usize) {}
+unsafe fn render_frame_inner(ctx: &RenderCtx, current_frame: &Frame, _image_index: usize) {
+    let command_buffer = current_frame.command_buffer;
+
+    ctx.device_loader.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, ctx.pipeline);
+
+    let viewport = vk::Viewport::builder().width(render_ctx::WIDTH as _).height(render_ctx::HEIGHT as _).max_depth(1.0);
+    let scissor = vk::Rect2D::builder().extent(vk::Extent2D {
+        width: render_ctx::WIDTH,
+        height: render_ctx::HEIGHT
+    });
+
+    ctx.device_loader.cmd_set_viewport(command_buffer, 0, slice::from_ref(&viewport));
+    ctx.device_loader.cmd_set_scissor(command_buffer, 0, slice::from_ref(&scissor));
+
+    ctx.mesh_shader_loader.cmd_draw_mesh_tasks(command_buffer, 1, 0);
+}

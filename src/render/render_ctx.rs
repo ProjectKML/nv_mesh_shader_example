@@ -44,6 +44,9 @@ pub struct RenderCtx {
     pub swapchain_image_views: Vec<vk::ImageView>,
     pub framebuffers: Vec<vk::Framebuffer>,
 
+    pub pipeline_layout: vk::PipelineLayout,
+    pub pipeline: vk::Pipeline,
+
     pub frames: Vec<ManuallyDrop<Frame>>
 }
 
@@ -156,6 +159,15 @@ impl RenderCtx {
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
 
+            let mesh_shader = util::create_shader_module(&device_loader, "example.mesh.spv").unwrap();
+            let fragment_shader = util::create_shader_module(&device_loader, "example.frag.spv").unwrap();
+
+            let pipeline_layout = device_loader.create_pipeline_layout(&vk::PipelineLayoutCreateInfo::builder(), None).unwrap();
+            let pipeline = util::create_mesh_pipeline(&device_loader, mesh_shader, None, fragment_shader, render_pass, pipeline_layout).unwrap();
+
+            device_loader.destroy_shader_module(fragment_shader, None);
+            device_loader.destroy_shader_module(mesh_shader, None);
+
             let frames: Vec<_> = (0..frame::NUM_FRAMES).into_iter().map(|_| ManuallyDrop::new(Frame::new(device_loader.clone()))).collect();
 
             Self {
@@ -185,6 +197,9 @@ impl RenderCtx {
                 swapchain_image_views,
                 framebuffers,
 
+                pipeline_layout,
+                pipeline,
+
                 frames
             }
         }
@@ -197,6 +212,9 @@ impl Drop for RenderCtx {
             self.device_loader.device_wait_idle().unwrap();
 
             self.frames.iter_mut().for_each(|frame| ManuallyDrop::drop(frame));
+
+            self.device_loader.destroy_pipeline(self.pipeline, None);
+            self.device_loader.destroy_pipeline_layout(self.pipeline_layout, None);
 
             self.framebuffers.iter().for_each(|framebuffer| self.device_loader.destroy_framebuffer(*framebuffer, None));
             self.device_loader.destroy_render_pass(self.render_pass, None);

@@ -1,4 +1,4 @@
-use std::slice;
+use std::{ffi::CStr, fs::File, io::Read, path::Path, slice};
 
 use anyhow::Result;
 use ash::{prelude::VkResult, vk, Device};
@@ -72,4 +72,90 @@ pub fn create_depth_image(device: &Device, allocator: &mut Allocator, width: u32
     let image_view = unsafe { device.create_image_view(&image_view_create_info, None) }?;
 
     Ok((image, allocation, image_view))
+}
+
+pub fn create_shader_module(device: &Device, path: impl AsRef<Path>) -> Result<vk::ShaderModule> {
+    let mut file = File::open(path)?;
+
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+
+    unsafe {
+        let shader_module_create_info = vk::ShaderModuleCreateInfo::builder().code(slice::from_raw_parts(buffer.as_ptr().cast(), buffer.len() >> 2));
+
+        Ok(device.create_shader_module(&shader_module_create_info, None)?)
+    }
+}
+
+pub unsafe fn create_mesh_pipeline(
+    device: &Device,
+    mesh_shader: vk::ShaderModule,
+    task_shader: Option<vk::ShaderModule>,
+    fragment_shader: vk::ShaderModule,
+    render_pass: vk::RenderPass,
+    layout: vk::PipelineLayout
+) -> Result<vk::Pipeline> {
+    let mut shader_stage_create_infos = vec![
+        vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::MESH_NV)
+            .module(mesh_shader)
+            .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
+            .build(),
+        vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(fragment_shader)
+            .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
+            .build(),
+    ];
+    if let Some(task_shader) = task_shader {
+        shader_stage_create_infos.push(
+            vk::PipelineShaderStageCreateInfo::builder()
+                .stage(vk::ShaderStageFlags::TASK_NV)
+                .module(task_shader)
+                .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
+                .build()
+        )
+    }
+
+    let input_assembly_state_create_info = vk::PipelineInputAssemblyStateCreateInfo::builder().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+
+    let viewport = vk::Viewport::builder().width(1.0).height(1.0).max_depth(1.0).build();
+
+    let scissor = vk::Rect2D::builder().extent(vk::Extent2D { width: 1, height: 1 });
+
+    let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
+        .viewports(slice::from_ref(&viewport))
+        .scissors(slice::from_ref(&scissor));
+
+    let rasterization_state_create_info = vk::PipelineRasterizationStateCreateInfo::builder().line_width(1.0);
+
+    let depth_stencil_state_create_info = vk::PipelineDepthStencilStateCreateInfo::builder()
+        .depth_test_enable(true)
+        .depth_write_enable(true)
+        .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
+
+    let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo::builder().rasterization_samples(vk::SampleCountFlags::TYPE_1);
+
+    let blend_attachment_state = vk::PipelineColorBlendAttachmentState::builder().color_write_mask(vk::ColorComponentFlags::RGBA);
+
+    let color_blend_state_create_info = vk::PipelineColorBlendStateCreateInfo::builder().attachments(slice::from_ref(&blend_attachment_state));
+
+    let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+    let dynamic_state_create_info = vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
+
+    let graphics_pipeline_create_info = vk::GraphicsPipelineCreateInfo::builder()
+        .stages(&shader_stage_create_infos)
+        .input_assembly_state(&input_assembly_state_create_info)
+        .viewport_state(&viewport_state_create_info)
+        .rasterization_state(&rasterization_state_create_info)
+        .depth_stencil_state(&depth_stencil_state_create_info)
+        .multisample_state(&multisample_state_create_info)
+        .color_blend_state(&color_blend_state_create_info)
+        .dynamic_state(&dynamic_state_create_info)
+        .layout(layout)
+        .render_pass(render_pass);
+
+    Ok(device
+        .create_graphics_pipelines(vk::PipelineCache::null(), slice::from_ref(&graphics_pipeline_create_info.build()), None)
+        .unwrap()[0])
 }
